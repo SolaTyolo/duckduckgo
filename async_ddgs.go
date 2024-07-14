@@ -42,6 +42,16 @@ func (a *AsyncDDGS) getExecutor() *http.Client {
 	return a.Executor
 }
 
+func (a AsyncDDGS) host(host string) string {
+	if a.Proxies != nil {
+		if proxy, ok := a.Proxies[host]; ok {
+			return proxy
+		}
+	}
+	return host
+
+}
+
 func (a *AsyncDDGS) agetURL(method string, url string, data []byte, params map[string]string) ([]byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(data))
 	if err != nil {
@@ -52,7 +62,7 @@ func (a *AsyncDDGS) agetURL(method string, url string, data []byte, params map[s
 		q.Add(key, value)
 	}
 	req.URL.RawQuery = q.Encode()
-	resp, err := a.Executor.Do(req)
+	resp, err := a.getExecutor().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +75,7 @@ func (a *AsyncDDGS) agetURL(method string, url string, data []byte, params map[s
 }
 
 func (a *AsyncDDGS) agetVqd(keywords string) (string, error) {
-	respContent, err := a.agetURL("POST", "https://duckduckgo.com", nil, map[string]string{"q": keywords})
+	respContent, err := a.agetURL("POST", fmt.Sprintf("https://%s", a.host("duckduckgo.com")), nil, map[string]string{"q": keywords})
 	if err != nil {
 		return "", err
 	}
@@ -453,7 +463,7 @@ func (a *AsyncDDGS) Images(keywords string, region string, safesearch string, ti
 		defer wg.Done()
 		priority := page * 100
 		payload["s"] = fmt.Sprintf("%d", s)
-		respContent, err := a.agetURL("GET", "https://duckduckgo.com/i.js", nil, payload)
+		respContent, err := a.agetURL("GET", fmt.Sprintf("https://%s/i.js", a.host("duckduckgo.com")), nil, payload)
 		if err != nil {
 			return
 		}
@@ -578,7 +588,7 @@ func (a *AsyncDDGS) Videos(keywords string, region string, safesearch string, ti
 		defer wg.Done()
 		priority := page * 100
 		payload["s"] = fmt.Sprintf("%d", s)
-		respContent, err := a.agetURL("GET", "https://duckduckgo.com/v.js", nil, payload)
+		respContent, err := a.agetURL("GET", fmt.Sprintf("https://%s/v.js", a.host("duckduckgo.com")), nil, payload)
 		if err != nil {
 			return
 		}
@@ -680,7 +690,7 @@ func (a *AsyncDDGS) News(keywords string, region string, safesearch string, time
 		defer wg.Done()
 		priority := page * 100
 		payload["s"] = fmt.Sprintf("%d", s)
-		respContent, err := a.agetURL("GET", "https://duckduckgo.com/news.js", nil, payload)
+		respContent, err := a.agetURL("GET", fmt.Sprintf("https://%s/news.js", a.host("duckduckgo.com")), nil, payload)
 		if err != nil {
 			return
 		}
@@ -832,7 +842,7 @@ func (a *AsyncDDGS) Suggestions(keywords string, region string) ([]map[string]st
 		"kl": region,
 	}
 
-	respContent, err := a.agetURL("GET", "https://duckduckgo.com/ac", nil, payload)
+	respContent, err := a.agetURL("GET", fmt.Sprintf("https://%s/ac", a.host("duckduckgo.com")), nil, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -856,7 +866,7 @@ func (a *AsyncDDGS) Suggestions(keywords string, region string) ([]map[string]st
 *   	   - ja
 *   	   - ko
 **/
-func (a *AsyncDDGS) Translate(keywords []string, from string, to string) ([]map[string]string, error) {
+func (a *AsyncDDGS) Translate(keywords []string, from string, to string) (map[string]string, error) {
 	if len(keywords) == 0 {
 		return nil, fmt.Errorf("Keywords is mandatory")
 	}
@@ -878,13 +888,11 @@ func (a *AsyncDDGS) Translate(keywords []string, from string, to string) ([]map[
 		payload["from"] = from
 	}
 
-	results := make([]map[string]string, 0)
-
 	var wg sync.WaitGroup
-	var mu sync.Mutex
+	var m sync.Map
 	translateKeyword := func(s string) {
 		defer wg.Done()
-		respContent, err := a.agetURL("POST", "https://duckduckgo.com/translation.js", []byte(s), payload)
+		respContent, err := a.agetURL("POST", fmt.Sprintf("https://%s/translation.js", a.host("duckduckgo.com")), []byte(s), payload)
 		if err != nil {
 			return
 		}
@@ -894,9 +902,7 @@ func (a *AsyncDDGS) Translate(keywords []string, from string, to string) ([]map[
 		}
 
 		if t, ok := pageData["translated"].(string); ok && len(t) > 0 {
-			mu.Lock()
-			results = append(results, map[string]string{s: t})
-			mu.Unlock()
+			m.Store(s, t)
 		}
 	}
 	for _, keyword := range keywords {
@@ -906,5 +912,11 @@ func (a *AsyncDDGS) Translate(keywords []string, from string, to string) ([]map[
 	}
 	wg.Wait()
 
-	return results, nil
+	result := make(map[string]string)
+	m.Range(func(k, v interface{}) bool {
+		result[k.(string)] = v.(string)
+		return true
+	})
+
+	return result, nil
 }
