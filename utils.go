@@ -74,7 +74,7 @@ func textExtractJSON(htmlBytes []byte, keywords string) ([]map[string]any, error
 func is500InURL(url string) bool {
 	exists, result := is500InURLCache.ContainsOrAdd(url, true)
 	if exists {
-		return true
+		return result
 	}
 	result = regex500InURL.MatchString(url)
 	is500InURLCache.Add(url, result)
